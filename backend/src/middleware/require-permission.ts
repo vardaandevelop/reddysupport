@@ -1,0 +1,4 @@
+import type { NextFunction, Request, Response } from "express";
+import { AppError } from "../utils/errors.js";
+export const requirePermission=(key:string)=>(req:Request,_res:Response,next:NextFunction)=>{ if(!req.management) return next(new AppError(401,"UNAUTHORIZED","Authentication required")); if(req.management.user.role!=="SUPER_ADMIN"&&!req.management.permissions.includes(key)) return next(new AppError(403,"FORBIDDEN","Permission required")); next(); };
+export function canAccessConversation(req:Request, conversation:{assignedStaffId:string|null;customer:{clientType:string}}){ const m=req.management; if(!m)return false; if(m.user.role!=="STAFF"||m.permissions.includes("conversations.view_all"))return true; const queue=conversation.customer.clientType === "NEW" ? "NEW_CLIENTS" : "RECURRING_CLIENTS"; return m.queues.includes(queue) && (!conversation.assignedStaffId || conversation.assignedStaffId === m.user.id); }

@@ -1,0 +1,340 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ManagementRole {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+}
+
+enum QueueType {
+  NEW_CLIENTS
+  RECURRING_CLIENTS
+}
+
+enum ClientType {
+  NEW
+  RECURRING
+}
+
+enum CustomerStatus {
+  ACTIVE
+  ARCHIVED
+  BLOCKED
+}
+
+enum CustomerSessionType {
+  TEMPORARY
+  AUTHENTICATED
+}
+
+enum ConversationStatus {
+  WAITING
+  ACTIVE
+  CLOSED
+}
+
+enum SenderType {
+  CUSTOMER
+  STAFF
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+  VOICE
+  SYSTEM
+}
+
+enum QuickActionVisibility {
+  NEW
+  RECURRING
+  BOTH
+}
+
+enum AuditActorType {
+  MANAGEMENT
+  CUSTOMER
+  SYSTEM
+}
+
+model User {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  name                  String                   @db.VarChar(120)
+  username              String                   @unique @db.VarChar(80)
+  passwordHash          String
+  role                  ManagementRole
+  active                Boolean                  @default(true)
+  lastLoginAt           DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  sessions              ManagementSession[]
+  permissions           UserPermission[]
+  queueAccess           StaffQueueAccess[]
+  assignedConversations Conversation[]           @relation("AssignedStaff")
+  convertedCustomers    Customer[]               @relation("ConvertedBy")
+  notes                 CustomerNote[]           @relation("NoteAuthor")
+  statusChanges         CustomerStatusHistory[]  @relation("StatusChangedBy")
+  assignedFrom          ConversationAssignment[] @relation("AssignmentFrom")
+  assignedTo            ConversationAssignment[] @relation("AssignmentTo")
+  assignmentsMade       ConversationAssignment[] @relation("AssignmentActor")
+
+  @@index([role, active])
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique @db.VarChar(100)
+  description String           @db.VarChar(240)
+  users       UserPermission[]
+  roles       RolePermission[]
+}
+
+model UserPermission {
+  userId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  granted      Boolean    @default(true)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+}
+
+model RolePermission {
+  role         ManagementRole
+  permissionId String         @db.Uuid
+  permission   Permission     @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([role, permissionId])
+  @@index([permissionId])
+}
+
+model StaffQueueAccess {
+  userId String    @db.Uuid
+  queue  QueueType
+  user   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, queue])
+}
+
+model ManagementSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @unique @db.Char(64)
+  ipAddress  String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(512)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Customer {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  clientCode          String                  @unique @db.VarChar(24)
+  name                String?                 @db.VarChar(120)
+  username            String?                 @unique @db.VarChar(80)
+  passwordHash        String?
+  clientType          ClientType              @default(NEW)
+  status              CustomerStatus          @default(ACTIVE)
+  firstSeenAt         DateTime                @default(now())
+  lastSeenAt          DateTime                @default(now())
+  evaluationExpiresAt DateTime?
+  convertedAt         DateTime?
+  convertedById       String?                 @db.Uuid
+  archivedAt          DateTime?
+  blockedAt           DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  convertedBy         User?                   @relation("ConvertedBy", fields: [convertedById], references: [id], onDelete: SetNull)
+  sessions            CustomerSession[]
+  conversations       Conversation[]
+  notes               CustomerNote[]
+  statusHistory       CustomerStatusHistory[]
+
+  @@index([clientType])
+  @@index([status])
+  @@index([evaluationExpiresAt])
+  @@index([lastSeenAt])
+}
+
+model CustomerSession {
+  id          String              @id @default(uuid()) @db.Uuid
+  customerId  String              @db.Uuid
+  tokenHash   String              @unique @db.Char(64)
+  sessionType CustomerSessionType
+  deviceName  String?             @db.VarChar(120)
+  browser     String?             @db.VarChar(120)
+  userAgent   String?             @db.VarChar(512)
+  ipAddress   String?             @db.VarChar(64)
+  createdAt   DateTime            @default(now())
+  lastSeenAt  DateTime            @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([expiresAt])
+}
+
+model Conversation {
+  id              String                   @id @default(uuid()) @db.Uuid
+  customerId      String                   @db.Uuid
+  status          ConversationStatus       @default(WAITING)
+  assignedStaffId String?                  @db.Uuid
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  lastMessageAt   DateTime?
+  closedAt        DateTime?
+  customer        Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedStaff   User?                    @relation("AssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  messages        Message[]
+  assignments     ConversationAssignment[]
+
+  @@index([customerId])
+  @@index([assignedStaffId])
+  @@index([status])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id               String       @id @default(uuid()) @db.Uuid
+  conversationId   String       @db.Uuid
+  senderType       SenderType
+  senderId         String?      @db.Uuid
+  messageType      MessageType
+  text             String?
+  clientMessageId  String?      @db.VarChar(120)
+  replyToMessageId String?      @db.Uuid
+  createdAt        DateTime     @default(now())
+  deliveredAt      DateTime?
+  readAt           DateTime?
+  editedAt         DateTime?
+  deletedAt        DateTime?
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments      Attachment[]
+  replyTo          Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies          Message[]    @relation("MessageReplies")
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt])
+  @@index([createdAt])
+  @@index([clientMessageId])
+}
+
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  messageId    String?  @db.Uuid
+  originalName String   @db.VarChar(255)
+  storedName   String   @unique @db.VarChar(255)
+  mimeType     String   @db.VarChar(160)
+  sizeBytes    Int
+  storageKey   String   @unique @db.VarChar(512)
+  createdAt    DateTime @default(now())
+  message      Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model CustomerNote {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @db.Uuid
+  authorId   String   @db.Uuid
+  content    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  author     User     @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+}
+
+model CustomerStatusHistory {
+  id          String          @id @default(uuid()) @db.Uuid
+  customerId  String          @db.Uuid
+  oldType     ClientType?
+  newType     ClientType?
+  oldStatus   CustomerStatus?
+  newStatus   CustomerStatus?
+  changedById String?         @db.Uuid
+  reason      String?         @db.VarChar(500)
+  createdAt   DateTime        @default(now())
+  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  changedBy   User?           @relation("StatusChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([customerId, createdAt])
+}
+
+model ConversationAssignment {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  fromStaffId    String?      @db.Uuid
+  toStaffId      String?      @db.Uuid
+  assignedById   String       @db.Uuid
+  reason         String?      @db.VarChar(500)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fromStaff      User?        @relation("AssignmentFrom", fields: [fromStaffId], references: [id], onDelete: SetNull)
+  toStaff        User?        @relation("AssignmentTo", fields: [toStaffId], references: [id], onDelete: SetNull)
+  assignedBy     User         @relation("AssignmentActor", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, createdAt])
+}
+
+model QuickAction {
+  id         String                @id @default(uuid()) @db.Uuid
+  label      String                @db.VarChar(80)
+  emoji      String?               @db.VarChar(16)
+  message    String                @db.VarChar(1000)
+  enabled    Boolean               @default(true)
+  order      Int                   @default(0)
+  visibility QuickActionVisibility @default(BOTH)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+
+  @@index([enabled, visibility, order])
+}
+
+model Settings {
+  id                      Int      @id @default(1)
+  businessName            String   @default("Support") @db.VarChar(120)
+  welcomeMessage          String   @default("Welcome! How can we help you today?") @db.VarChar(1000)
+  newClientEvaluationDays Int      @default(20)
+  archiveEnabled          Boolean  @default(true)
+  archiveRetentionDays    Int      @default(30)
+  supportOnline           Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String         @id @default(uuid()) @db.Uuid
+  actorId    String?        @db.Uuid
+  actorName  String?        @db.VarChar(120)
+  actorType  AuditActorType
+  action     String         @db.VarChar(120)
+  targetType String?        @db.VarChar(80)
+  targetId   String?        @db.VarChar(120)
+  ipAddress  String?        @db.VarChar(64)
+  userAgent  String?        @db.VarChar(512)
+  metadata   Json?
+  createdAt  DateTime       @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+}

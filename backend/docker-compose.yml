@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: support_db
+      POSTGRES_USER: support_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_development_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support_user -d support_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [support_internal]
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 8080
+      DATABASE_URL: postgresql://support_user:${POSTGRES_PASSWORD:-local_development_password}@postgres:5432/support_db
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      MANAGEMENT_COOKIE_NAME: ${MANAGEMENT_COOKIE_NAME:-management_session}
+      CUSTOMER_COOKIE_NAME: ${CUSTOMER_COOKIE_NAME:-customer_session}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET to at least 32 characters}
+      SESSION_DAYS: ${SESSION_DAYS:-30}
+      TEMP_CUSTOMER_SESSION_DAYS: ${TEMP_CUSTOMER_SESSION_DAYS:-20}
+      PASSWORD_ARGON_MEMORY_COST: ${PASSWORD_ARGON_MEMORY_COST:-65536}
+      PASSWORD_ARGON_TIME_COST: ${PASSWORD_ARGON_TIME_COST:-3}
+      PASSWORD_ARGON_PARALLELISM: ${PASSWORD_ARGON_PARALLELISM:-1}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+      UPLOAD_DIR: /app/data/uploads
+      RETENTION_INTERVAL_MINUTES: ${RETENTION_INTERVAL_MINUTES:-60}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - upload_data:/app/data/uploads
+    networks: [support_internal]
+volumes:
+  postgres_data:
+  upload_data:
+networks:
+  support_internal:
+    driver: bridge

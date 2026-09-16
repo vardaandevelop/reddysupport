@@ -1,0 +1,7 @@
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../src/services/password.service.js";
+const rl=createInterface({input,output}),prisma=new PrismaClient();
+async function hiddenPassword(prompt:string){if(!input.isTTY)return rl.question(prompt);output.write(prompt);input.setRawMode?.(true);let value="";return new Promise<string>((resolve)=>{const onData=(chunk:Buffer)=>{const char=chunk.toString();if(char==="\r"||char==="\n"){input.setRawMode?.(false);input.off("data",onData);output.write("\n");resolve(value);}else if(char==="\u0003")process.exit(130);else if(char==="\u007f")value=value.slice(0,-1);else value+=char;};input.on("data",onData);});}
+try{const name=(await rl.question("Name: ")).trim(),username=(await rl.question("Username: ")).trim().toLowerCase(),password=await hiddenPassword("Password (minimum 12 characters): ");if(name.length<2||username.length<3||password.length<12)throw new Error("Name, username, or password does not meet minimum length");if(await prisma.user.findUnique({where:{username}}))throw new Error("A user with that username already exists");await prisma.user.create({data:{name,username,passwordHash:await hashPassword(password),role:"SUPER_ADMIN"}});output.write("Super Admin created successfully.\n");}catch(error){console.error(error instanceof Error?error.message:"Creation failed");process.exitCode=1;}finally{rl.close();await prisma.$disconnect();}
